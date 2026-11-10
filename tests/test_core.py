@@ -30,7 +30,8 @@ class AnalysisCase(unittest.TestCase):
         path = self.root / name
         if text is None:
             text = "Area\n" + "".join(f"{math.pi * (d / 2) ** 2}\n" for d in diameters)
-        path.write_text(text, encoding="utf-8")
+        # Preserve deliberately supplied line endings on Windows as well as Unix.
+        path.write_bytes(text.encode("utf-8"))
         entry = {"group": group, "replicate": rep, "image": f"image-{index}", "table": name,
                  "delimiter": ",", "area_unit": "um2", "calibration_confirmed": True}
         entry.update(kwargs)
@@ -133,6 +134,7 @@ class AnalysisCase(unittest.TestCase):
     def test_hashes_match_exact_parsed_bytes_and_preserve_inputs(self):
         _, path = self.add_table(text="\ufeffArea\r\n100\r\n")
         before = path.read_bytes()
+        self.assertEqual(before, b"\xef\xbb\xbfArea\r\n100\r\n")
         report = self.run_analysis()
         self.assertEqual(report["sources"][0]["sha256"], hashlib.sha256(before).hexdigest())
         self.assertEqual(path.read_bytes(), before)
