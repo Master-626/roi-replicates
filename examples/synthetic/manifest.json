@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "replicate_definition": "Fictional independent culture preparation; not real experimental data",
+  "within_replicate": "objects",
+  "images": [
+    {
+      "group": "SYNTHETIC demo",
+      "replicate": "A",
+      "image": "A-field-1",
+      "table": "rep_a_field_1.csv",
+      "delimiter": ",",
+      "area_unit": "um2",
+      "calibration_confirmed": true,
+      "exclude_column": "exclude_reason",
+      "object_column": ""
+    },
+    {
+      "group": "SYNTHETIC demo",
+      "replicate": "A",
+      "image": "A-field-2",
+      "table": "rep_a_field_2.csv",
+      "delimiter": ",",
+      "area_unit": "um2",
+      "calibration_confirmed": true,
+      "object_column": ""
+    },
+    {
+      "group": "SYNTHETIC demo",
+      "replicate": "B",
+      "image": "B-field-1",
+      "table": "rep_b_field_1.csv",
+      "delimiter": ",",
+      "area_unit": "px2",
+      "pixel_size_um": [
+        0.5,
+        0.5
+      ],
+      "calibration_confirmed": true,
+      "object_column": ""
+    },
+    {
+      "group": "SYNTHETIC demo",
+      "replicate": "C",
+      "image": "C-field-1",
+      "table": "rep_c_empty.csv",
+      "delimiter": ",",
+      "area_unit": "um2",
+      "calibration_confirmed": true,
+      "object_column": ""
+    }
+  ]
+}
