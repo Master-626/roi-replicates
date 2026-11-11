@@ -120,7 +120,7 @@ class ExportTests(unittest.TestCase):
     def test_module_entrypoint_and_version(self):
         result = subprocess.run([sys.executable, "-m", "roi_replicates", "--version"],
                                 capture_output=True, text=True, encoding="utf-8", check=True)
-        self.assertIn("0.1.0", result.stdout)
+        self.assertIn("0.1.1", result.stdout)
 
     def test_bad_input_cli_subprocess(self):
         result = subprocess.run([sys.executable, "-m", "roi_replicates", "validate", str(self.root / "missing")],

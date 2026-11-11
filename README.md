@@ -2,7 +2,7 @@
 
 **From ImageJ/Fiji area tables to traceable, replicate-aware 2D size summaries.**
 
-MIT-licensed source · Python 3.10+ · no runtime dependencies · experimental 0.1.0
+MIT-licensed source · Python 3.10+ · no runtime dependencies · experimental 0.1.1
 
 This package fills a small gap between measurement exports and plotting: it requires explicit area units and experiment grouping, converts each ROI's area to an area-equivalent diameter, then produces descriptive summaries without silently treating every ROI as an independent biological experiment.
 
@@ -16,7 +16,8 @@ It **does not segment images, choose exclusions, infer calibration or independen
 - 每个 ROI 都保留原始面积、来源记录、纳入/排除状态和原因。没有自动删异常值。
 - 每组对各个可分析重复的均值等权汇总。重复内按对象还是按图像平均，需要你明确选择。
 - 空图像、无有效对象的重复不会消失，也不会被当成“直径为零”。输出单独记录数量并发出提示。
-- 原始文件只读。输出必须是全新目录，包含 JSON、四级 CSV 和校验值。
+- 原始文件只读。输出必须是全新目录，包含 JSON、四级 CSV 和校验值。`roi-replicates verify 目录` 会重算 SHA-256，并拒绝带 `_INCOMPLETE` 的目录。
+- 默认 ImageJ 结果表的行号列表头是一个空格（` ,Area,...`）。这个空格列可以读取；`object_column` 设为 `""` 时保留那些行号。
 
 **这是早期软件，不是经实验验证的分析流程。** 二维等效圆直径不等于三维细胞球直径，软件也不能证明分割、视野选择、标定或实验独立性正确。不要直接把示例标定值用于真实数据。
 
@@ -31,6 +32,28 @@ roi-replicates --version
 
 There is no network access during analysis. Building from source may require downloading the build tools listed in `pyproject.toml`. For an offline install, build a wheel on a compatible connected machine, then install that wheel with `python -m pip install --no-index --no-deps <wheel-file>`.
 
+Development tools are optional:
+
+```sh
+python -m pip install ".[dev]"
+```
+
+## Commands
+
+```sh
+roi-replicates validate MANIFEST
+roi-replicates summarize MANIFEST -o NEW_DIRECTORY
+roi-replicates verify NEW_DIRECTORY
+roi-replicates --version
+```
+
+- `validate` reads the manifest and measurement tables, then prints a JSON summary. It writes nothing.
+- `summarize` performs the same analysis and writes a new directory. `-o` / `--output` is required, and that directory must not already exist.
+- `verify` recomputes the SHA-256 of every file named in `checksums.json`. It fails if `_INCOMPLETE` is present, a required file is missing, a listed name leaves the directory, or any byte does not match.
+- Exit code 0 means the command finished. Warnings do not change it. Exit code 2 means invalid input, a failed export, or a failed verification.
+
+`python -m roi_replicates` is the same interface.
+
 ## Try the synthetic example
 
 Run these commands from the extracted source root. `synthetic-report` must not already exist:
@@ -38,6 +61,7 @@ Run these commands from the extracted source root. `synthetic-report` must not a
 ```sh
 roi-replicates validate examples/synthetic/manifest.json
 roi-replicates summarize examples/synthetic/manifest.json -o synthetic-report
+roi-replicates verify synthetic-report
 python examples/use_api.py
 ```
 
@@ -77,7 +101,7 @@ Save each image's measurement table separately under the same directory as its m
 
 Set `calibration_confirmed` to true **only after checking the actual acquisition/export calibration**. `source_image` is an optional label, not a loaded or hash-verified image. The package hashes the measurement tables, not image pixels. For pixel area, use `"area_unit": "px2"` plus `"pixel_size_um": [x_size, y_size]` in µm/pixel. There is no unit guessing, implicit mm² conversion, or automatic scale-bar measurement.
 
-To preserve original ROI IDs, set `"object_column": "ROI"` (or `"object_column": ""` for an unlabeled ImageJ row-number header). IDs remain strings, including leading zeros; duplicate IDs within an image are rejected. Without this option, parsed record numbers still trace objects to their source tables.
+To preserve original ROI IDs, set `"object_column": "ROI"`. Set `"object_column": ""` for ImageJ's row-number column. That matches a blank heading, or the single leading space ImageJ writes when row numbers are saved (` ,Area,...` in CSV, or the same space before a tab). IDs remain strings, including leading zeros; duplicate IDs within an image are rejected. Without this option, the row-number column is ignored and parsed record numbers still trace objects to their source tables.
 
 Use a different globally unique `image` identifier for every image. Replicate identifiers are scoped within each group. Reusing a replicate label across groups does not establish paired data. The grouping must correspond to your design, not just different filenames, wells, fields, days, or objects. See [the full input/output contract](docs/schema.md).
 
@@ -102,22 +126,23 @@ A successful export contains:
 
 JSON `null` and blank CSV numeric fields mean **undefined**, not zero. SD needs at least two values. Warnings are machine-readable and are not scientific judgments. The CLI prints a short JSON summary; exit code 0 means parsing/analysis succeeded, even if warnings exist. Exit code 2 means invalid input or export failure. Help/version exit normally.
 
-CSV is a convenience export: formula-like text cells get a leading apostrophe for safer spreadsheet use. `report.json` preserves strings exactly. Numeric precision is not deliberately rounded. Spreadsheet programs may still change IDs, dates and numeric precision; import identifier columns as text and use JSON for exact downstream processing. Check hashes for accidental changes; hashes are not signatures or proof of scientific validity.
+CSV is a convenience export: formula-like text cells get a leading apostrophe for safer spreadsheet use. `report.json` preserves strings exactly. Numeric precision is not deliberately rounded. Spreadsheet programs may still change IDs, dates and numeric precision; import identifier columns as text and use JSON for exact downstream processing. `roi-replicates verify` checks hashes for accidental changes. Hashes are not signatures or proof of scientific validity, and a replacement of both a file and `checksums.json` is not detected.
 
 The output directory must be new and its parent must exist. Content is serialized before any writes. Export failures or interruption can leave a partial directory; `_INCOMPLETE` marks it. Use only outputs with `checksums.json` **and no `_INCOMPLETE`**. Never reuse a partial destination for a retry. The caller must control the destination and not modify it concurrently; this is not a hostile-filesystem security boundary or a crash-durable transaction.
 
 ## Python API
 
 ```python
-from roi_replicates import analyze_manifest, equivalent_diameter, export_report
+from roi_replicates import analyze_manifest, equivalent_diameter, export_report, verify_export
 
 print(equivalent_diameter(100))  # 11.283791670955125 µm, from 100 µm²
 report = analyze_manifest("measurements/manifest.json")
 print(report["groups"])
 export_report(report, "new-report-directory")
+print(verify_export("new-report-directory")["file_count"])
 ```
 
-`analyze_manifest` returns a regular dictionary or raises `ValidationError` for invalid input. `export_report` accepts that dictionary unmodified; arbitrary hand-built report structures are not a supported input API. Filesystem and serialization failures are raised to library callers. `python -m roi_replicates` provides the same CLI.
+`analyze_manifest` returns a regular dictionary or raises `ValidationError` for invalid input. `export_report` accepts that dictionary unmodified; arbitrary hand-built report structures are not a supported input API. Filesystem and serialization failures are raised to library callers. `verify_export` raises `ValidationError` when the directory is incomplete or a checksum does not match. `python -m roi_replicates` provides the same CLI.
 
 ## Mathematics and limits
 
@@ -130,9 +155,10 @@ Read [method limits and existing tools](docs/rationale.md). For segmentation use
 ## Development and verification
 
 ```sh
-python -m pip install .
-python -m unittest discover -s tests -v
+python -m pip install ".[dev]"
+ruff check src tests examples
+python -m pytest
 python -m compileall -q src tests examples
 ```
 
-The test suite covers synthetic calibration, unequal object/image counts, per-object conversion, both weighting modes, empty/excluded data, malformed tables/manifests, finite-value checks, source hashes, duplicate input protection, deterministic exports, no overwrite and injected export failures. `docs/verification.md` records checks performed. No real experimental measurements were used, and tests do not establish scientific validation. The [GitHub Actions workflow](https://github.com/Master-626/roi-replicates/actions/workflows/tests.yml) tests Linux, Windows and macOS. Check the run for the commit you use; no untested Python version or platform is implied to be verified.
+`pytest` runs the unittest modules and the pytest modules. The suite covers synthetic calibration, unequal object/image counts, per-object conversion, both weighting modes, empty/excluded data, ImageJ's row-number heading, malformed tables/manifests, finite-value checks, source hashes, duplicate input protection, deterministic exports, no overwrite, injected export failures, and `verify`. `docs/verification.md` records earlier checks. No real experimental measurements were used, and tests do not establish scientific validation. The [GitHub Actions workflow](https://github.com/Master-626/roi-replicates/actions/workflows/tests.yml) runs ruff and pytest on Python 3.10–3.14 on Linux, and on Python 3.13 on Windows and macOS. Check the run for the commit you use; no untested Python version or platform is implied to be verified.
