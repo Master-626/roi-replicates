@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import ValidationError, __version__, analyze_manifest, export_report
+from . import ValidationError, __version__, analyze_manifest, export_report, verify_export
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,8 +19,14 @@ def main(argv: list[str] | None = None) -> int:
     summarize = subparsers.add_parser("summarize", help="Write a new directory of JSON/CSV reports")
     summarize.add_argument("manifest", type=Path)
     summarize.add_argument("-o", "--output", required=True, type=Path)
+    verify = subparsers.add_parser("verify", help="Recompute checksums for an export directory")
+    verify.add_argument("directory", type=Path)
     args = parser.parse_args(argv)
     try:
+        if args.command == "verify":
+            result = verify_export(args.directory)
+            print(json.dumps({"valid": True, **result}, ensure_ascii=False, allow_nan=False))
+            return 0
         report = analyze_manifest(args.manifest)
         if args.command == "summarize":
             export_report(report, args.output)

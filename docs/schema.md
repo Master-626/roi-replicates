@@ -25,12 +25,12 @@ Optional image keys:
 - `area_column`: exact header name; default `Area`.
 - `pixel_size_um`: exactly two positive finite numbers `[x, y]`; mandatory for `px2`, forbidden for `um2`. Anisotropic pixel area is supported. Inputs that underflow/overflow the positive finite conversion range fail.
 - `exclude_column`: exact header name, different from `area_column`. A trimmed nonempty cell is an exclusion reason. It cannot contain control characters. A blank cell includes the row. This column must be explicitly configured.
-- `object_column`: optional exact original ROI-ID header, or `""` for an unlabeled ImageJ row-number column. IDs are preserved as text without numerical coercion, must be nonempty and unique within each image, and reject surrounding whitespace/control characters instead of trimming them. It must differ from area/exclusion columns. If omitted, `source_object_id` is null and the record number still traces back to the table.
+- `object_column`: optional exact original ROI-ID header, or `""` for ImageJ's row-number column. `""` matches one blank heading, or a first-column heading that is exactly one space. ImageJ writes that space when it saves row numbers (` ,Area,...` or a tab-delimited equivalent). IDs are preserved as text without numerical coercion, must be nonempty and unique within each image, and reject surrounding whitespace/control characters instead of trimming them. It must differ from area/exclusion columns. If omitted, `source_object_id` is null and the record number still traces back to the table. A blank heading and a leading single-space heading together are ambiguous and rejected.
 - `source_image`: nonempty provenance label only. The file is not accessed and calibration/segmentation/image identity are not verified.
 
 ## Measurement tables
 
-UTF-8 CSV or TSV; UTF-8 BOM, LF and CRLF are supported. Every parsed data record must have exactly the header's column count. Quoting follows Python's strict CSV parser. Headers must be unique and cannot have surrounding whitespace. A single blank header is allowed for ImageJ's row-number column; it is ignored unless selected with `object_column: ""`. Blank records are errors. A header with zero data rows is a valid empty image.
+UTF-8 CSV or TSV; UTF-8 BOM, LF and CRLF are supported. Every parsed data record must have exactly the header's column count. Quoting follows Python's strict CSV parser. Headers must be unique and cannot have surrounding whitespace. A blank heading is allowed, and so is a first column whose heading is exactly one space (the row-number heading ImageJ writes). Those cells are ignored unless selected with `object_column: ""`. Any other surrounding whitespace is rejected. Blank records are errors. A header with zero data rows is a valid empty image.
 
 The selected area column must contain a positive finite ASCII decimal number, optionally with sign, decimal point or exponent. Surrounding area-cell whitespace is ignored for parsing but preserved in `raw_area`. Decimal commas, grouping separators, NaN, infinity, underscores and empty cells are rejected. Even an excluded row requires a valid area.
 
@@ -48,7 +48,7 @@ Group `n_replicates_declared` counts declared group/replicate pairs, while `n_re
 
 Warnings:
 
-- `identical_table_bytes`: distinct image tables have exactly equal bytes. Review possible accidental duplicate exports; equality alone is not a reason to exclude.
+- `identical_table_bytes`: distinct image tables have exactly equal bytes. `other_image` is the first image, in manifest order, with those bytes. Review possible accidental duplicate exports; equality alone is not a reason to exclude.
 - `no_included_objects`: empty or fully excluded image; count retained, diameter undefined.
 - `fewer_than_two_analyzable_replicates`: fewer than two nonempty replicate means; group SD undefined.
 - `empty_replicate_not_in_mean`: one or more declared replicates have no included objects. Counts are retained and means cannot include those replicates. Investigate what absence means in the experiment.

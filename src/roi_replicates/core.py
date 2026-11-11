@@ -78,6 +78,36 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict:
     return result
 
 
+def _reject_header_whitespace(header: list[str], where: str) -> None:
+    """Reject padded headings.
+
+    ImageJ ResultsTable.getColumnHeadings() writes the row-number heading as one
+    leading space. That cell is not a padded measurement name.
+    """
+    for index, cell in enumerate(header):
+        if index == 0 and cell == " ":
+            continue
+        if cell and cell != cell.strip():
+            raise ValidationError(f"{where}: header has surrounding whitespace")
+
+
+def _object_column_index(header: list[str], object_column: str | None, where: str) -> int | None:
+    if object_column is None:
+        return None
+    if object_column != "":
+        if object_column not in header:
+            raise ValidationError(f"{where}: object ID column is missing")
+        return header.index(object_column)
+    # "" selects ImageJ's unlabeled row-number column: a blank heading, or the
+    # single leading space ResultsTable.getColumnHeadings() actually writes.
+    candidates = [i for i, cell in enumerate(header) if cell == "" or (i == 0 and cell == " ")]
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise ValidationError(f"{where}: object ID column is missing")
+    raise ValidationError(f"{where}: ambiguous ImageJ row-number header")
+
+
 def _read(path: Path, limit: int) -> bytes:
     try:
         if not path.is_file():
@@ -217,6 +247,8 @@ def analyze_manifest(path: str | Path) -> dict[str, Any]:
         resolved = table_path.resolve()
         stat = table_path.stat()
         identity = (stat.st_dev, stat.st_ino)
+        # st_ino 0 means the platform did not report an inode. Treating those as
+        # identical would reject every later file on that filesystem.
         if resolved in paths or (stat.st_ino != 0 and identity in inodes):
             raise ValidationError(f"table used more than once: {entry['table']}")
         paths.add(resolved)
@@ -225,7 +257,8 @@ def analyze_manifest(path: str | Path) -> dict[str, Any]:
         if sha256 in hashes:
             warnings.append({"code": "identical_table_bytes", "image": image_id,
                              "other_image": hashes[sha256]})
-        hashes[sha256] = image_id
+        else:
+            hashes[sha256] = image_id
         source = dict(entry)
         source.update({"sha256": sha256, "bytes": len(data)})
         sources.append(source)
@@ -235,14 +268,11 @@ def analyze_manifest(path: str | Path) -> dict[str, Any]:
             header = next(reader, None)
             if not header or len(set(header)) != len(header):
                 raise ValidationError(f"{where}: missing or duplicate table header")
-            # ImageJ may export one unlabeled row-number column; it is ignored.
-            if any(h and h != h.strip() for h in header):
-                raise ValidationError(f"{where}: header has surrounding whitespace")
+            # A blank heading, or ImageJ's single leading space, is the row-number column.
+            _reject_header_whitespace(header, where)
             if area_column not in header or (exclude_column and exclude_column not in header):
                 raise ValidationError(f"{where}: required measurement column is missing")
-            if object_column is not None and object_column not in header:
-                raise ValidationError(f"{where}: object ID column is missing")
-            object_index = header.index(object_column) if object_column is not None else None
+            object_index = _object_column_index(header, object_column, where)
             object_ids: set[str] = set()
             area_index = header.index(area_column)
             exclude_index = header.index(exclude_column) if exclude_column else None

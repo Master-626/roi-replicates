@@ -6,9 +6,21 @@ import csv
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 from typing import Any
 
+from .core import ValidationError, _unique_pairs
+
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_REQUIRED_EXPORTS = (
+    "report.json",
+    "objects.csv",
+    "images.csv",
+    "replicates.csv",
+    "groups.csv",
+    "README.txt",
+)
 _FIELDS = {
     "objects": ["group", "replicate", "image", "record", "source_object_id", "source_line_end", "raw_area",
                 "area_unit", "area_um2", "diameter_um", "included", "exclude_reason"],
@@ -78,3 +90,81 @@ def export_report(report: dict[str, Any], destination: str | Path) -> Path:
             stream.write(data)
     marker.unlink()
     return output
+
+
+def _plain_export_name(name: str) -> None:
+    if (
+        not isinstance(name, str)
+        or name in {"", ".", ".."}
+        or any(sep in name for sep in ("/", "\\", ":"))
+        or name != Path(name).name
+        or any(ord(char) < 32 or ord(char) == 127 for char in name)
+    ):
+        raise ValidationError(f"checksum entry is not a plain file name: {name!r}")
+
+
+def _load_checksums(data: bytes) -> dict[str, Any]:
+    if len(data) > 1_048_576:
+        raise ValidationError("checksums.json exceeds the 1 MiB limit")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise ValidationError("checksums.json: expected UTF-8") from exc
+    try:
+        parsed = json.loads(
+            text,
+            object_pairs_hook=_unique_pairs,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValidationError(f"non-finite JSON constant: {token}")
+            ),
+        )
+    except ValidationError:
+        raise
+    except (ValueError, RecursionError) as exc:
+        raise ValidationError(f"invalid checksums.json: {exc}") from exc
+    if not isinstance(parsed, dict) or not parsed:
+        raise ValidationError("checksums.json must be a nonempty object")
+    return parsed
+
+
+def verify_export(destination: str | Path) -> dict[str, Any]:
+    """Recompute SHA-256 checksums for a directory written by export_report.
+
+    Succeeds only when `_INCOMPLETE` is absent, every required report file is
+    listed in checksums.json, and each listed file's bytes match. Names cannot
+    escape the directory, and symlinks are rejected. This catches accidental
+    edits and truncated copies. It does not detect someone rewriting a file and
+    checksums.json together, and it is not a signature or a scientific review.
+    """
+    output = Path(destination)
+    if output.is_symlink() or not output.is_dir():
+        raise ValidationError("export path must be a real directory")
+    marker = output / "_INCOMPLETE"
+    if marker.is_symlink() or marker.exists():
+        raise ValidationError("incomplete export: _INCOMPLETE marker is present")
+    checksum_path = output / "checksums.json"
+    if checksum_path.is_symlink() or not checksum_path.is_file():
+        raise ValidationError("checksums.json is missing")
+    try:
+        checksums = _load_checksums(checksum_path.read_bytes())
+    except OSError as exc:
+        raise ValidationError(f"cannot read checksums.json: {exc.strerror}") from exc
+    missing = [name for name in _REQUIRED_EXPORTS if name not in checksums]
+    if missing:
+        raise ValidationError(f"checksums.json is missing {missing}")
+    verified: list[str] = []
+    for name, digest in checksums.items():
+        _plain_export_name(name)
+        if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+            raise ValidationError(f"{name}: checksum must be a lowercase sha256 hex digest")
+        path = output / name
+        if path.is_symlink() or not path.is_file():
+            raise ValidationError(f"{name}: expected a regular file in the export directory")
+        try:
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise ValidationError(f"cannot read {name}: {exc.strerror}") from exc
+        if actual != digest:
+            raise ValidationError(f"{name}: checksum mismatch")
+        verified.append(name)
+    return {"file_count": len(verified), "files": verified}
